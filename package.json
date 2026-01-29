@@ -1,5 +1,7 @@
 {
-  "name": "Frontend",
+  "name": "atenasdocs",
+  "version": "0.0.1",
+  "codename": "Aurora",
   "private": true,
   "type": "module",
   "scripts": {

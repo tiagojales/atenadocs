@@ -13,7 +13,10 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     public: {
-      pdfMergeApiBase: (process.env?.PDF_MERGE_API_BASE_URL) || ''
+      pdfMergeApiBase: (process.env?.PDF_MERGE_API_BASE_URL) || '',
+      appName: 'AtenasDocs',
+      appVersion: '0.0.1',
+      appCodename: 'Aurora'
     }
   },
 

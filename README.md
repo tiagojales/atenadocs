@@ -1,60 +1,63 @@
-# Nuxt Starter Template
+# AtenasDocs (Frontend)
 
 [![Nuxt UI](https://img.shields.io/badge/Made%20with-Nuxt%20UI-00DC82?logo=nuxt&labelColor=020420)](https://ui.nuxt.com)
 
-Use this template to get started with [Nuxt UI](https://ui.nuxt.com) quickly.
-
-- [Live demo](https://starter-template.nuxt.dev/)
-- [Documentation](https://ui.nuxt.com/docs/getting-started/installation/nuxt)
-
-<a href="https://starter-template.nuxt.dev/" target="_blank">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://ui.nuxt.com/assets/templates/nuxt/starter-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://ui.nuxt.com/assets/templates/nuxt/starter-light.png">
-    <img alt="Nuxt Starter Template" src="https://ui.nuxt.com/assets/templates/nuxt/starter-light.png">
-  </picture>
-</a>
-
-> The starter template for Vue is on https://github.com/nuxt-ui-templates/starter-vue.
+Frontend application based on Nuxt. Quick reference for local development, building and deployment.
 
 ## Quick Start
 
-```bash [Terminal]
-npm create nuxt@latest -- -t github:nuxt-ui-templates/starter
-```
+Clone the repository and install dependencies. This project uses `pnpm` in the workspace, but the npm commands below work with the `scripts` defined in `package.json`.
 
-## Deploy your own
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-name=starter&repository-url=https%3A%2F%2Fgithub.com%2Fnuxt-ui-templates%2Fstarter&demo-image=https%3A%2F%2Fui.nuxt.com%2Fassets%2Ftemplates%2Fnuxt%2Fstarter-dark.png&demo-url=https%3A%2F%2Fstarter-template.nuxt.dev%2F&demo-title=Nuxt%20Starter%20Template&demo-description=A%20minimal%20template%20to%20get%20started%20with%20Nuxt%20UI.)
-
-## Setup
-
-Make sure to install the dependencies:
+Using pnpm (recommended):
 
 ```bash
 pnpm install
-```
-
-## Development Server
-
-Start the development server on `http://localhost:3000`:
-
-```bash
 pnpm dev
 ```
 
-## Production
-
-Build the application for production:
+Using npm:
 
 ```bash
-pnpm build
+npm install
+npm run dev
 ```
 
-Locally preview production build:
+## Scripts
+
+- `npm run dev` / `pnpm dev` — start development server (hot-reload) on http://localhost:3000
+- `npm run build` / `pnpm build` — build for production
+- `npm run preview` / `pnpm preview` — locally preview the production build
+- `npm run lint` — run ESLint
+- `npm run typecheck` — run TypeScript type checks
+
+Example (build + preview):
 
 ```bash
-pnpm preview
+npm run build
+npm run preview
 ```
 
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+## Environment
+
+Runtime configuration is set in `nuxt.config.ts` under `runtimeConfig.public`. Example environment variable used by the app:
+
+- `PDF_MERGE_API_BASE_URL` — base URL for the PDF merge backend API
+
+Set environment variables in your hosting provider or locally before building/starting the server.
+
+## Deployment
+
+Recommended: deploy to a platform with first-class Nuxt support (Vercel or Netlify). Nuxt's automatic adapters will handle the server/output.
+
+- Vercel: create a new project and point it to this repository. The default build command `npm run build` works; Vercel will detect Nuxt and configure the runtime. For static-friendly deployments, enable "Output Directory" if requested (.output/public).
+
+- Netlify: use the `npm run build` command. In Netlify site settings set the build command to `npm run build` and the publish directory to `.output/public` (for Nuxt 3/4 Nitro output). If you need serverless functions, use the Nuxt adapter docs.
+
+- Self-host / Docker: build with `npm run build` and run the server using the Nitro output or a Node server depending on your configuration. See Nuxt docs: https://nuxt.com/docs/getting-started/deployment
+
+## Notes
+
+- Prefer `pnpm` if you work across the monorepo/workspace, otherwise npm scripts are compatible.
+- For edge deployments or serverless, review Nuxt Nitro output and platform adapter docs.
+
+For full deployment instructions, see the official Nuxt docs: https://nuxt.com/docs/getting-started/deployment

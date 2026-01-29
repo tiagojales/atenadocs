@@ -1,7 +1,7 @@
 <template>
   <img
-    src="~/assets/img/logo.png"
+    src="/logo.png"
     alt="AtenasDocs Logo"
-    class="h-8 w-auto"
+    class="h-6 w-auto"
   >
 </template>
