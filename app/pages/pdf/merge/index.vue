@@ -2,6 +2,7 @@
 import { VueDraggableNext } from 'vue-draggable-next'
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import usePdfMerge from '../../../../composables/usePdfMerge'
+import { navigateTo } from '#app'
 
 const value = ref<File[]>([])
 const uploaderRef = ref<any>(null)
@@ -125,10 +126,31 @@ const filesLabel = computed(() => {
 })
 
 // Integration with backend composable
-const { isUploading: uploadingFlag, error: uploadError, requestPresignedPosts, uploadFiles, requestMerge } = usePdfMerge()
+const { isUploading: uploadingFlag, error: uploadError, requestPresignedPosts, uploadFiles, requestMerge, requestPresignedGet } = usePdfMerge()
 const isUploading = uploadingFlag
-const mergedUrl = ref<string | null>(null)
+// merged URL state is handled by the nested `download` child route via query params
 const fileProgress = ref<number[]>([])
+
+const pageSize = ref(10)
+const currentPage = ref(1)
+const totalPages = computed(() => Math.max(1, Math.ceil(totalFiles.value / pageSize.value)))
+
+const pagedFiles = computed<File[]>({
+  get() {
+    const start = (currentPage.value - 1) * pageSize.value
+    return value.value.slice(start, start + pageSize.value)
+  },
+  set(newPage) {
+    const start = (currentPage.value - 1) * pageSize.value
+    const before = value.value.slice(0, start)
+    const after = value.value.slice(start + newPage.length)
+    value.value = [...before, ...newPage, ...after]
+  }
+})
+
+watch(totalPages, (tp) => {
+  if (currentPage.value > tp) currentPage.value = tp
+})
 
 // initialize progress array whenever files change
 watch(value, (files: File[]) => {
@@ -158,10 +180,12 @@ const handleMerge = async () => {
 
     const fileKeys = uploads.map(u => u.key)
     const mergeRes = await requestMerge(fileKeys)
+    // If backend returned an immediate presigned S3 URL, navigate to nested download route with URL
     if (mergeRes.downloadUrl) {
-      mergedUrl.value = mergeRes.downloadUrl
-      // open in new tab
-      window.open(mergeRes.downloadUrl, '_blank')
+      await navigateTo({ path: '/pdf/merge/download', query: { url: mergeRes.downloadUrl } })
+    } else if (mergeRes.fileKey) {
+      // navigate to nested download route with fileKey
+      await navigateTo({ path: '/pdf/merge/download', query: { key: mergeRes.fileKey } })
     } else {
       // eslint-disable-next-line no-alert
       alert(mergeRes.message || 'Merge concluído sem URL de download')
@@ -208,8 +232,14 @@ const handleMerge = async () => {
               <UIcon name="i-lucide-circle-x" />
           </UButton>
         </div>
-        <VueDraggableNext v-if="value.length" v-model="value" class="dark:divide-gray-400" handle=".handle">
-            <div v-for="file in value" :key="file.name" class="flex handle cursor-move justify-between px-2 m-2 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-300">
+
+          <div v-if="isUploading" class="w-full">
+            <p class="text-sm text-gray-700 dark:text-gray-300">Enviando arquivos... Progresso: {{ Math.round((fileProgress.reduce((a,b)=>a+b,0) / (fileProgress.length || 1))) }}%</p>
+          </div>
+
+
+        <VueDraggableNext v-if="value.length" v-model="pagedFiles" class="dark:divide-gray-400" handle=".handle">
+            <div v-for="(file, pIndex) in pagedFiles" :key="file.name" class="flex handle cursor-move justify-between px-2 m-2 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-300">
                 <div class="flex items-center gap-4">
                   <UIcon name="i-lucide-grip-vertical" class="w-6 h-6 " />
                   <div class="flex-1 m-2">
@@ -219,29 +249,45 @@ const handleMerge = async () => {
                       <p class="text-sm dark:text-gray-400">
                           {{ (file.size / 1024 / 1024).toFixed(2) }} MB
                       </p>
+                      <p v-if="fileProgress.length" class="text-sm text-gray-600">Progresso: {{ fileProgress[((currentPage-1)*pageSize)+pIndex] || 0 }}%</p>
                   </div>
                 </div>
                 <UButton icon="i-lucide-x" class="h-7 my-auto" variant="ghost" @click="removeFile(file)" />
             </div>
         </VueDraggableNext>
-        <div v-if="value.length" class="flex flex-col gap-4 mt-6 mb-6">
-          <div v-if="isUploading" class="w-full">
-            <p class="text-sm text-gray-700 dark:text-gray-300">Enviando arquivos... Progresso: {{ Math.round((fileProgress.reduce((a,b)=>a+b,0) / (fileProgress.length || 1))) }}%</p>
+        <div v-if="value.length" class="flex items-center justify-between gap-4 mt-4">
+          <div class="flex items-center gap-2">
+            <UButton size="sm" variant="outline" :disabled="currentPage===1" @click="currentPage = Math.max(1, currentPage-1)">Anterior</UButton>
+            <span class="text-sm">Página {{ currentPage }} / {{ totalPages }}</span>
+            <UButton size="sm" variant="outline" :disabled="currentPage>=totalPages" @click="currentPage = Math.min(totalPages, currentPage+1)">Próxima</UButton>
           </div>
-          <div class="flex justify-between items-center">
           <div>
-            <p class="text-sm text-gray-900 dark:text-white">
-              {{ totalFiles }} {{ filesLabel }}, totalizando: {{ (totalSize / 1024 / 1024).toFixed(2) }}MB
-            </p>
+            <label class="text-sm">Por página:</label>
+            <select v-model.number="pageSize" class="ml-2 text-sm">
+              <option :value="5">5</option>
+              <option :value="10">10</option>
+              <option :value="25">25</option>
+            </select>
           </div>
-          <UButton size="xl" label="Juntar" :disabled="totalFiles < 2 || isUploading" @click="handleMerge">
-              <span v-if="!isUploading">Juntar</span>
-              <span v-else>Enviando...</span>
-              <UIcon name="i-lucide-merge" />
-          </UButton>
+        </div>
+        <div v-if="value.length" class="flex flex-col gap-4 mt-6 mb-6">
+
+          <div class="flex justify-between items-center">
+            <div>
+              <p class="text-sm text-gray-900 dark:text-white">
+                {{ totalFiles }} {{ filesLabel }}, totalizando: {{ (totalSize / 1024 / 1024).toFixed(2) }}MB
+              </p>
+            </div>
+            <UButton size="xl" label="Juntar" :disabled="totalFiles < 2 || isUploading" @click="handleMerge">
+                <span v-if="!isUploading">Juntar</span>
+                <span v-else>Enviando...</span>
+                <UIcon name="i-lucide-merge" />
+            </UButton>
           </div>
         </div>
       </template>
     </UFileUpload>
+    <!-- nested child route will render here when navigated to /pdf/merge/download -->
+    <router-view />
   </UPage>
 </template>
