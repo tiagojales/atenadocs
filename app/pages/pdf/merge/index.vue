@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { VueDraggableNext } from 'vue-draggable-next'
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
+import usePdfMerge from '../../../../composables/usePdfMerge'
 
 const value = ref<File[]>([])
 const uploaderRef = ref<any>(null)
@@ -122,6 +123,54 @@ const totalSize = computed(() => {
 const filesLabel = computed(() => {
   return totalFiles.value === 1 ? 'arquivo' : 'arquivos'
 })
+
+// Integration with backend composable
+const { isUploading: uploadingFlag, error: uploadError, requestPresignedPosts, uploadFiles, requestMerge } = usePdfMerge()
+const isUploading = uploadingFlag
+const mergedUrl = ref<string | null>(null)
+const fileProgress = ref<number[]>([])
+
+// initialize progress array whenever files change
+watch(value, (files: File[]) => {
+  fileProgress.value = files?.map(() => 0) || []
+})
+
+const handleMerge = async () => {
+  if (isUploading.value) return
+  if (totalFiles.value < 2) {
+    // eslint-disable-next-line no-alert
+    alert('Selecione pelo menos dois arquivos para juntar.')
+    return
+  }
+
+  try {
+    const fileNames = value.value.map(f => f.name)
+    const pres = await requestPresignedPosts(fileNames)
+    const uploads = pres.uploads
+
+    // upload with progress callbacks
+    await uploadFiles(value.value, uploads, {
+      concurrency: 3,
+      onFileProgress: (index, uploaded, total) => {
+        fileProgress.value[index] = Math.round((uploaded / total) * 100)
+      }
+    })
+
+    const fileKeys = uploads.map(u => u.key)
+    const mergeRes = await requestMerge(fileKeys)
+    if (mergeRes.downloadUrl) {
+      mergedUrl.value = mergeRes.downloadUrl
+      // open in new tab
+      window.open(mergeRes.downloadUrl, '_blank')
+    } else {
+      // eslint-disable-next-line no-alert
+      alert(mergeRes.message || 'Merge concluído sem URL de download')
+    }
+  } catch (err: any) {
+    // eslint-disable-next-line no-alert
+    alert(err?.message || 'Erro durante upload/merge')
+  }
+}
 </script>
 
 <template>
@@ -175,16 +224,22 @@ const filesLabel = computed(() => {
                 <UButton icon="i-lucide-x" class="h-7 my-auto" variant="ghost" @click="removeFile(file)" />
             </div>
         </VueDraggableNext>
-        <div v-if="value.length" class="flex justify-between items-center mt-6 mb-6">
+        <div v-if="value.length" class="flex flex-col gap-4 mt-6 mb-6">
+          <div v-if="isUploading" class="w-full">
+            <p class="text-sm text-gray-700 dark:text-gray-300">Enviando arquivos... Progresso: {{ Math.round((fileProgress.reduce((a,b)=>a+b,0) / (fileProgress.length || 1))) }}%</p>
+          </div>
+          <div class="flex justify-between items-center">
           <div>
             <p class="text-sm text-gray-900 dark:text-white">
               {{ totalFiles }} {{ filesLabel }}, totalizando: {{ (totalSize / 1024 / 1024).toFixed(2) }}MB
             </p>
           </div>
-          <UButton size="xl" label="Juntar" :disabled="totalFiles < 2">
-              Juntar
+          <UButton size="xl" label="Juntar" :disabled="totalFiles < 2 || isUploading" @click="handleMerge">
+              <span v-if="!isUploading">Juntar</span>
+              <span v-else>Enviando...</span>
               <UIcon name="i-lucide-merge" />
           </UButton>
+          </div>
         </div>
       </template>
     </UFileUpload>

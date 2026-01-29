@@ -5,6 +5,12 @@ export default defineNuxtConfig({
     '@nuxt/ui'
   ],
 
+  runtimeConfig: {
+    public: {
+      pdfMergeApiBase: ((process as any)?.env?.PDF_MERGE_API_BASE_URL) || ''
+    }
+  },
+
   devtools: {
     enabled: true
   },
