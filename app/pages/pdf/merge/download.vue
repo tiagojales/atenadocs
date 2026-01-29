@@ -1,21 +1,93 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRoute, navigateTo } from '#app'
-import usePdfMerge from '../../../../composables/usePdfMerge'
+import usePdfMerge, { type UsePdfMergeReturn } from '../../../../composables/usePdfMerge'
 
+// Page overview:
+// Resolve a download target from the route query (either a direct URL or a server key),
+// obtain a presigned GET URL when needed, and provide a client-side download flow
+// that attempts to preserve the original filename when possible.
+
+// Router and backend composable (typed)
 const route = useRoute()
-const { requestPresignedGet } = usePdfMerge()
+const { requestPresignedGet } = usePdfMerge() as UsePdfMergeReturn
 
+// Reactive state
+// - `downloadUrl`: final URL that will be fetched by the client
+// - `loading`: operation in progress flag
+// - `error`: user-facing error message
 const downloadUrl = ref<string | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 
+// Helpers extracted to module scope to keep `doDownload` concise.
+const stripQuotes = (s: string) => s.replace(/^\s*"?(.+?)"?\s*$/, '$1')
+
+const parseDisposition = (d?: string | null) => {
+  if (!d) return null
+  const star = /filename\*=(?:UTF-8'')?([^;]+)/i.exec(d)
+  if (star && star[1]) return stripQuotes(star[1])
+  const plain = /filename=([^;]+)/i.exec(d)
+  if (plain && plain[1]) return stripQuotes(plain[1])
+  return null
+}
+
+const getFilenameFromResponse = (resp: Response, urlStr: string | null): string => {
+  const defaultName = 'merged.pdf'
+  const cd = resp.headers.get('Content-Disposition')
+  const fromCd = parseDisposition(cd)
+  if (fromCd) {
+    try {
+      return decodeURIComponent(fromCd)
+    } catch {
+      return fromCd
+    }
+  }
+
+  if (urlStr) {
+    try {
+      const u = new URL(urlStr)
+      const qp = u.searchParams.get('response-content-disposition') || u.searchParams.get('content-disposition') || null
+      const fromQp = parseDisposition(qp)
+      if (fromQp) {
+        try {
+          return decodeURIComponent(fromQp)
+        } catch {
+          return fromQp
+        }
+      }
+      const pathSeg = u.pathname.split('/').filter(Boolean)
+      if (pathSeg.length) return pathSeg[pathSeg.length - 1]!
+    } catch {
+      /* ignore URL parsing errors */
+    }
+  }
+  return defaultName
+}
+
+const triggerBrowserDownload = (blob: Blob, filename: string) => {
+  const blobUrl = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = blobUrl
+  a.download = filename
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(blobUrl)
+}
+
+const getErrorMessage = (err: unknown, fallback = 'Erro desconhecido') => (err instanceof Error ? err.message : String(err)) || fallback
+
+// Resolve the download target when the page mounts.
+// Priority: `url` query param (use as-is to avoid tampering with presigned tokens),
+// otherwise request a presigned GET URL from the backend using `key`.
 const start = async () => {
   const url = route.query.url as string | undefined
   const key = route.query.key as string | undefined
 
   if (url) {
-    // router provides the decoded query value; use it as-is to avoid corrupting presigned tokens
+    // Use decoded query value directly (presigned tokens are sensitive to encoding)
     downloadUrl.value = url ?? null
     return
   }
@@ -27,8 +99,7 @@ const start = async () => {
       if (res?.downloadUrl) downloadUrl.value = res.downloadUrl
       else error.value = 'URL de download não disponível.'
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      error.value = msg || 'Erro ao solicitar URL de download.'
+      error.value = getErrorMessage(err, 'Erro ao solicitar URL de download.')
     } finally {
       loading.value = false
     }
@@ -37,11 +108,19 @@ const start = async () => {
   }
 }
 
+// Start resolving URL on client mount
 onMounted(() => {
-  start()
+  // Ensure this initialization runs only on the client (defensive)
+  if (import.meta.client) start()
 })
 
+// Perform the client-side download:
+// 1) fetch the blob from `downloadUrl`
+// 2) attempt to determine a sensible filename from `Content-Disposition` or the URL
+// 3) create an object URL and trigger a download via an anchor element
 const doDownload = async () => {
+  // Defensive: download flow depends on browser APIs (fetch, URL, DOM)
+  if (!import.meta.client) return
   if (!downloadUrl.value) return
   loading.value = true
   error.value = null
@@ -50,48 +129,16 @@ const doDownload = async () => {
     if (!resp.ok) throw new Error(`Download failed: ${resp.status}`)
     const blob = await resp.blob()
 
-    // Try to obtain a filename from headers or URL
-    let filename = 'merged.pdf'
-    const cd = resp.headers.get('Content-Disposition')
-    if (cd) {
-      const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/.exec(cd)
-      if (m && m[1]) filename = decodeURIComponent(m[1] as string)
-    } else {
-      try {
-        const u = new URL(downloadUrl.value)
-        const qp = u.searchParams.get('response-content-disposition') || u.searchParams.get('response-content-disposition')
-        if (qp) {
-          const m2 = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/.exec(qp)
-          if (m2 && m2[1]) filename = decodeURIComponent(m2[1] as string)
-        } else {
-          const pathSeg = u.pathname.split('/').filter(Boolean) as string[]
-          if (pathSeg.length) {
-            const last = pathSeg[pathSeg.length - 1]
-            if (last) filename = last
-          }
-        }
-      } catch {
-        // ignore URL parsing errors
-      }
-    }
-
-    const blobUrl = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = blobUrl
-    a.download = filename
-    a.rel = 'noopener'
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(blobUrl)
+    const filename = getFilenameFromResponse(resp, downloadUrl.value)
+    triggerBrowserDownload(blob, filename)
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
-    error.value = msg || 'Erro ao baixar arquivo.'
+    error.value = getErrorMessage(err, 'Erro ao baixar arquivo.')
   } finally {
     loading.value = false
   }
 }
 
+// Navigate back to the merge page so the user can retry
 const refazer = async () => {
   await navigateTo('/pdf/merge')
 }
@@ -110,20 +157,27 @@ const refazer = async () => {
 
     <div class="max-w-4/5 mx-auto mt-6 p-6">
       <div class="flex gap-4 justify-center ">
-        <div class="flex items-center gap-3">
+        <div
+          class="flex items-center gap-3"
+          :aria-busy="loading"
+        >
           <UButton
             class="px-6 py-3 dark:text-white"
             size="lg"
+            :disabled="!downloadUrl || loading"
             @click="doDownload"
           >
             <UIcon
               name="i-lucide-download"
               class="w-5 h-5 mr-3"
-            />Baixar PDF
+            />
+            <span v-if="!loading">Baixar PDF</span>
+            <span v-else>Baixando...</span>
           </UButton>
           <UButton
             class="px-6 py-3 dark:text-white"
             variant="outline"
+            :disabled="loading"
             @click="refazer"
           >
             <UIcon
@@ -132,6 +186,16 @@ const refazer = async () => {
             />Refazer
           </UButton>
         </div>
+      </div>
+      <div class="max-w-4/5 mx-auto mt-3 text-center">
+        <p
+          v-if="error"
+          class="text-sm text-red-600"
+          role="alert"
+          aria-live="assertive"
+        >
+          {{ error }}
+        </p>
       </div>
     </div>
   </UPage>

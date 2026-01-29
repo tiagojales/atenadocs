@@ -1,23 +1,27 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
-import usePdfMerge from '../../../../composables/usePdfMerge'
+import { computed, ref, watch, onMounted, onUnmounted, defineAsyncComponent, type Component } from 'vue'
+import usePdfMerge, { type UsePdfMergeReturn } from '../../../../composables/usePdfMerge'
 import { navigateTo } from '#app'
 import { useToast } from '#imports'
 
 const value = ref<File[]>([])
-// uploaderRef holds the file upload component instance. Typed to the exposed shape from UFileUpload.
-// The component exposes raw HTMLElements for refs, not Vue Refs, so reflect that here.
+// Reference to the file upload component; exposes DOM elements (dropzone/input).
 const uploaderRef = ref<{ dropzoneRef?: HTMLElement | null, inputRef?: HTMLElement | null } | null>(null)
 const toast = useToast()
 
-// UI props moved to constants to avoid inline object recreation on each render
+// UI props extracted to avoid recreating objects in the template
 const uiFileUpload = {
   label: 'text-xl',
   description: 'text-lg'
 }
 
-// Lazy-load draggable to reduce initial bundle size
-const VueDraggableNext = defineAsyncComponent(() => import('vue-draggable-next').then(m => (m && (m as any).VueDraggableNext) || (m && (m as any).default) || m))
+// Lazy-load the draggable/reorder component to reduce initial bundle size
+const VueDraggableNext = defineAsyncComponent(async () => {
+  const mod = await import('vue-draggable-next')
+  const unknownMod = mod as unknown
+  const candidate = (unknownMod as { VueDraggableNext?: Component }).VueDraggableNext ?? (unknownMod as { default?: Component }).default ?? (unknownMod as Component)
+  return candidate
+})
 
 const MAX_FILES = 25
 const MAX_BYTES = 50 * 1024 * 1024 // 50 MB
@@ -56,22 +60,19 @@ const validateFiles = (files: File[] = []): ValidationResult => {
   return { kept, removedByCount, removedBySize, invalid }
 }
 
-// Compare two file arrays by name/size/lastModified to avoid unnecessary reassignments
-const getLastModified = (f: File) => (f as unknown as { lastModified?: number }).lastModified ?? 0
+// Compact signature used to compare files by name/size/lastModified
+const fileSignature = (f: File) => `${f.name}:${f.size}:${(f as unknown as { lastModified?: number }).lastModified ?? 0}`
+// Safe comparator for file arrays: equal length and matching signature per index
+const filesEqual = (a: File[] = [], b: File[] = []) => a.length === b.length && a.every((fa, i) => {
+  const fb = b[i]
+  return !!fb && fileSignature(fa) === fileSignature(fb)
+})
 
-const filesEqual = (a: File[] = [], b: File[] = []) => {
-  if (a === b) return true
-  if (a.length !== b.length) return false
-  for (let i = 0; i < a.length; i++) {
-    const fa = a[i]
-    const fb = b[i]
-    if (!fa || !fb) return false
-    if (fa.name !== fb.name || fa.size !== fb.size || getLastModified(fa) !== getLastModified(fb)) return false
-  }
-  return true
+// Single watcher: validates incoming files and initializes per-file progress array
+const initFileProgress = (len = value.value.length) => {
+  fileProgress.value = new Array<number>(len).fill(0)
 }
 
-// Consolidated watcher: validates incoming files and also initializes per-file progress
 watch(value, (newFiles: File[] | undefined) => {
   // Ensure we have an array
   const incoming = newFiles || []
@@ -83,7 +84,7 @@ watch(value, (newFiles: File[] | undefined) => {
     if (!filesEqual(value.value, kept)) value.value = kept
     toast.add({ title: 'Erro', description: 'Apenas arquivos PDF são permitidos!' })
     // initialize progress array
-    fileProgress.value = value.value.map(() => 0)
+    initFileProgress(kept.length)
     return
   }
 
@@ -95,49 +96,41 @@ watch(value, (newFiles: File[] | undefined) => {
     if (removedBySize.length) msg += ` Limite de tamanho excedido (máx ${(MAX_BYTES / 1024 / 1024).toFixed(2)}MB).`
     toast.add({ title: 'Aviso', description: msg })
     // initialize progress array
-    fileProgress.value = value.value.map(() => 0)
+    initFileProgress(kept.length)
     return
   }
 
   // If validation passed, keep incoming files and reset progress
   if (!filesEqual(value.value, kept)) value.value = kept
-  fileProgress.value = value.value.map(() => 0)
+  initFileProgress()
 })
 
-// Handlers declared in module scope so they can be attached/detached cleanly.
-const windowDragOver = (e: DragEvent) => {
-  if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
-    e.preventDefault()
-  }
+// Handlers live in module scope so listeners can be attached/detached cleanly
+const preventFileDragDefault = (e: DragEvent) => {
+  // Prevent default browser file drag/drop behavior on the window
+  if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) e.preventDefault()
 }
 
-const windowDrop = (e: DragEvent) => {
-  if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
-    e.preventDefault()
-  }
-}
-
+// Drop handler for the dropzone: validate dropped files
 const dzDropHandler = (e: DragEvent) => {
   e.preventDefault()
   const dt = e.dataTransfer
   if (!dt) return
   const files = Array.from(dt.files || [])
   const { invalid } = validateFiles(files)
-  if (invalid.length) {
-    toast.add({ title: 'Erro', description: 'Apenas arquivos PDF são permitidos.' })
-  }
+  if (invalid.length) toast.add({ title: 'Error', description: 'Only PDF files are allowed.' })
 }
 
 onMounted(() => {
   const dzEl = uploaderRef.value?.dropzoneRef
-  window.addEventListener('dragover', windowDragOver, { passive: false })
-  window.addEventListener('drop', windowDrop, { passive: false })
+  window.addEventListener('dragover', preventFileDragDefault, { passive: false })
+  window.addEventListener('drop', preventFileDragDefault, { passive: false })
   if (dzEl) dzEl.addEventListener('drop', dzDropHandler)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('dragover', windowDragOver as EventListener)
-  window.removeEventListener('drop', windowDrop as EventListener)
+  window.removeEventListener('dragover', preventFileDragDefault as EventListener)
+  window.removeEventListener('drop', preventFileDragDefault as EventListener)
   const dzEl = uploaderRef.value?.dropzoneRef
   if (dzEl) dzEl.removeEventListener('drop', dzDropHandler as EventListener)
 })
@@ -160,7 +153,7 @@ const filesLabel = computed(() => {
 })
 
 // Integration with backend composable
-const { isUploading: uploadingFlag, requestPresignedPosts, uploadFiles, requestMerge } = usePdfMerge()
+const { isUploading: uploadingFlag, requestPresignedPosts, uploadFiles, requestMerge } = usePdfMerge() as UsePdfMergeReturn
 const isUploading = uploadingFlag
 // merged URL state is handled by the nested `download` child route via query params
 const fileProgress = ref<number[]>([])
@@ -397,6 +390,6 @@ const handleMerge = async () => {
       </template>
     </UFileUpload>
     <!-- nested child route will render here when navigated to /pdf/merge/download -->
-    <NuxtChild />
+    <NuxtPage />
   </UPage>
 </template>

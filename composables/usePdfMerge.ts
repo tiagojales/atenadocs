@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, type Ref } from 'vue'
 
 // `useRuntimeConfig` is auto-injected by Nuxt at runtime. Declare a minimal public shape for our usage.
 declare function useRuntimeConfig(): { public: { pdfMergeApiBase?: string } }
@@ -14,7 +14,20 @@ export type UploadDescriptor = {
   post_details: PostDetails
 }
 
-export function usePdfMerge() {
+export type UsePdfMergeReturn = {
+  isUploading: Ref<boolean>
+  error: Ref<string | null>
+  overallProgress: Ref<number>
+  cancelled: Ref<boolean>
+  requestPresignedPosts: (fileNames: string[]) => Promise<{ uploads: UploadDescriptor[] }>
+  uploadFileWithPresigned: (post: PostDetails, file: File, onProgress?: (uploaded: number, total: number) => void, attempts?: number, id?: number) => Promise<void>
+  uploadFiles: (files: File[], uploads: UploadDescriptor[], opts?: { concurrency?: number, attempts?: number, onFileProgress?: (index: number, uploaded: number, total: number) => void }) => Promise<void>
+  cancelUploads: () => void
+  requestMerge: (fileKeys: string[]) => Promise<{ message?: string, downloadUrl?: string, fileKey?: string }>
+  requestPresignedGet: (fileKey: string) => Promise<{ downloadUrl?: string }>
+}
+
+export function usePdfMerge(): UsePdfMergeReturn {
   const isUploading = ref(false)
   const error = ref<string | null>(null)
   const overallProgress = ref(0)
@@ -65,15 +78,24 @@ export function usePdfMerge() {
   }
 
   // Upload a single file using presigned POST details. Reports progress via onProgress
-  const uploadFileWithPresigned = (post: PostDetails, file: File, onProgress?: (uploaded: number, total: number) => void, attempts = 2, id?: number): Promise<void> => {
+  class UploadError extends Error {
+    constructor(message: string, public status?: number, public retryable = true) {
+      super(message)
+      this.name = 'UploadError'
+    }
+  }
+
+  const UPLOAD_TIMEOUT_MS = 2 * 60 * 1000 // 2 minutes
+
+  const uploadFileWithPresigned = async (post: PostDetails, file: File, onProgress?: (uploaded: number, total: number) => void, attempts = 2, id?: number): Promise<void> => {
     const doUpload = () => new Promise<void>((resolve, reject) => {
       const fd = new FormData()
       Object.entries(post.fields || {}).forEach(([k, v]) => fd.append(k, v))
-      // S3 expects the file field (commonly 'file') as the last field
       fd.append('file', file)
 
       const xhr = new XMLHttpRequest()
       xhr.open('POST', post.url, true)
+      xhr.timeout = UPLOAD_TIMEOUT_MS
       if (typeof id === 'number') activeXhrs.set(id, xhr)
 
       xhr.upload.onprogress = (e) => {
@@ -81,36 +103,45 @@ export function usePdfMerge() {
       }
 
       xhr.onload = () => {
-        // S3 presigned POST typically returns 204 No Content on success
-        if (xhr.status >= 200 && xhr.status < 300) {
-          if (typeof id === 'number') activeXhrs.delete(id)
-          resolve()
-        } else {
-          if (typeof id === 'number') activeXhrs.delete(id)
-          reject(new Error(`Upload failed with status ${xhr.status}`))
-        }
+        if (typeof id === 'number') activeXhrs.delete(id)
+        if (xhr.status >= 200 && xhr.status < 300) return resolve()
+        const status = xhr.status
+        // Treat client errors as non-retryable (4xx), server/network as retryable
+        const retryable = status >= 500 || status === 0
+        return reject(new UploadError(`Upload failed with status ${status}`, status, retryable))
       }
 
-      xhr.onerror = () => reject(new Error('Network error during upload'))
+      xhr.onerror = () => {
+        if (typeof id === 'number') activeXhrs.delete(id)
+        return reject(new UploadError('Network error during upload', undefined, true))
+      }
+
+      xhr.ontimeout = () => {
+        if (typeof id === 'number') activeXhrs.delete(id)
+        return reject(new UploadError('Upload timed out', undefined, true))
+      }
+
+      xhr.onabort = () => {
+        if (typeof id === 'number') activeXhrs.delete(id)
+        return reject(new UploadError('Upload aborted', undefined, false))
+      }
+
       xhr.send(fd)
     })
 
-    return new Promise<void>((resolve, reject) => {
-      ;(async () => {
-        let lastErr: unknown = null
-        for (let i = 0; i <= attempts; i++) {
-          try {
-            await doUpload()
-            return resolve()
-          } catch (err: unknown) {
-            lastErr = err
-            // exponential backoff before retrying
-            if (i < attempts) await new Promise(r => setTimeout(r, 2 ** i * 250))
-          }
-        }
-        reject(lastErr)
-      })().catch(reject)
-    })
+    let lastErr: unknown = null
+    for (let i = 0; i <= attempts; i++) {
+      try {
+        await doUpload()
+        return
+      } catch (err: unknown) {
+        lastErr = err
+        if (err instanceof UploadError && err.retryable === false) throw err
+        // exponential backoff before retrying
+        if (i < attempts) await new Promise(r => setTimeout(r, 2 ** i * 250))
+      }
+    }
+    throw lastErr
   }
 
   // Upload multiple files respecting concurrency and reporting per-file progress.
@@ -190,7 +221,7 @@ export function usePdfMerge() {
     cancelUploads,
     requestMerge,
     requestPresignedGet
-  }
+  } as UsePdfMergeReturn
 }
 
 export default usePdfMerge
