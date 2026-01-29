@@ -26,8 +26,9 @@ const start = async () => {
       const res = await requestPresignedGet(key as string)
       if (res?.downloadUrl) downloadUrl.value = res.downloadUrl
       else error.value = 'URL de download não disponível.'
-    } catch (e: any) {
-      error.value = e?.message || 'Erro ao solicitar URL de download.'
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      error.value = msg || 'Erro ao solicitar URL de download.'
     } finally {
       loading.value = false
     }
@@ -69,7 +70,7 @@ const doDownload = async () => {
             if (last) filename = last
           }
         }
-      } catch (e) {
+      } catch {
         // ignore URL parsing errors
       }
     }
@@ -83,8 +84,9 @@ const doDownload = async () => {
     a.click()
     a.remove()
     URL.revokeObjectURL(blobUrl)
-  } catch (e: any) {
-    error.value = e?.message || 'Erro ao baixar arquivo.'
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    error.value = msg || 'Erro ao baixar arquivo.'
   } finally {
     loading.value = false
   }
@@ -98,17 +100,39 @@ const refazer = async () => {
 <template>
   <UPage>
     <div class="max-w-4/5 text-center mx-auto items-center mt-20 px-4">
-        <h2 class="text-2xl font-semibold text-gray-900 dark:text-white">Seus PDFs foram juntados com sucesso!</h2>
-        <p class="text-base text-gray-600 dark:text-gray-300">Clique no botão abaixo para baixar o arquivo.</p>
+      <h2 class="text-2xl font-semibold text-gray-900 dark:text-white">
+        Seus PDFs foram juntados com sucesso!
+      </h2>
+      <p class="text-base text-gray-600 dark:text-gray-300">
+        Clique no botão abaixo para baixar o arquivo.
+      </p>
     </div>
 
     <div class="max-w-4/5 mx-auto mt-6 p-6">
-        <div class="flex gap-4 justify-center ">
-            <div class="flex items-center gap-3">
-                <UButton class="px-6 py-3 dark:text-white" size="lg" @click="doDownload"><UIcon name="i-lucide-download" class="w-5 h-5 mr-3" />Baixar PDF</UButton>
-                <UButton class="px-6 py-3 dark:text-white" variant="outline" @click="refazer"><UIcon name="i-lucide-rotate-ccw" class="w-5 h-5 mr-3" />Refazer</UButton>
-            </div>
+      <div class="flex gap-4 justify-center ">
+        <div class="flex items-center gap-3">
+          <UButton
+            class="px-6 py-3 dark:text-white"
+            size="lg"
+            @click="doDownload"
+          >
+            <UIcon
+              name="i-lucide-download"
+              class="w-5 h-5 mr-3"
+            />Baixar PDF
+          </UButton>
+          <UButton
+            class="px-6 py-3 dark:text-white"
+            variant="outline"
+            @click="refazer"
+          >
+            <UIcon
+              name="i-lucide-rotate-ccw"
+              class="w-5 h-5 mr-3"
+            />Refazer
+          </UButton>
         </div>
+      </div>
     </div>
   </UPage>
 </template>

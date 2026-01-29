@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 
-// `useRuntimeConfig` is auto-injected by Nuxt at runtime. Declare it for TypeScript
-declare function useRuntimeConfig(): any
+// `useRuntimeConfig` is auto-injected by Nuxt at runtime. Declare a minimal public shape for our usage.
+declare function useRuntimeConfig(): { public: { pdfMergeApiBase?: string } }
 
 type PostDetails = {
   url: string
@@ -49,7 +49,7 @@ export function usePdfMerge() {
     })
     if (!resp.ok) throw new Error(`Merge request failed: ${resp.status}`)
     const res = await resp.json()
-    return res as { message?: string; downloadUrl?: string; fileKey?: string }
+    return res as { message?: string, downloadUrl?: string, fileKey?: string }
   }
 
   // Request a presigned GET URL for a merged file identified by `fileKey`.
@@ -95,19 +95,21 @@ export function usePdfMerge() {
       xhr.send(fd)
     })
 
-    return new Promise<void>(async (resolve, reject) => {
-      let lastErr: any = null
-      for (let i = 0; i <= attempts; i++) {
-        try {
-          await doUpload()
-          return resolve()
-        } catch (err) {
-          lastErr = err
-          // exponential backoff before retrying
-          if (i < attempts) await new Promise(r => setTimeout(r, 2 ** i * 250))
+    return new Promise<void>((resolve, reject) => {
+      ;(async () => {
+        let lastErr: unknown = null
+        for (let i = 0; i <= attempts; i++) {
+          try {
+            await doUpload()
+            return resolve()
+          } catch (err: unknown) {
+            lastErr = err
+            // exponential backoff before retrying
+            if (i < attempts) await new Promise(r => setTimeout(r, 2 ** i * 250))
+          }
         }
-      }
-      reject(lastErr)
+        reject(lastErr)
+      })().catch(reject)
     })
   }
 
@@ -148,8 +150,9 @@ export function usePdfMerge() {
           overallProgress.value = Math.round((sumUploaded / sumTotal) * 100)
           if (opts?.onFileProgress) opts.onFileProgress(i, loaded, total)
         }, attempts, i)
-      } catch (err: any) {
-        throw new Error(`Failed to upload ${file.name}: ${err?.message || err}`)
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        throw new Error(`Failed to upload ${file.name}: ${msg}`)
       }
       return runNext()
     }
@@ -166,10 +169,10 @@ export function usePdfMerge() {
 
   const cancelUploads = () => {
     cancelled.value = true
-    for (const [k, xhr] of activeXhrs) {
+    for (const [_k, xhr] of activeXhrs) {
       try {
         xhr.abort()
-      } catch (e) {
+      } catch {
         // ignore
       }
     }

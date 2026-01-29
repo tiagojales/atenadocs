@@ -1,3 +1,7 @@
+<script setup>
+const year = new Date().getFullYear()
+</script>
+
 <template>
   <Suspense>
     <UApp>
@@ -17,19 +21,20 @@
         <NuxtPage />
       </UMain>
 
-      <USeparator/>
+      <USeparator />
 
       <UFooter>
         <template #left>
           <p class="text-sm text-muted">
-            Developed by Tiago Jales • © {{ new Date().getFullYear() }}
+            Developed by Tiago Jales • © {{ year }}
           </p>
         </template>
 
         <template #right>
           <UButton
-            to="https://github.com/nuxt-ui-templates/starter-vue"
+            href="https://github.com/nuxt-ui-templates/starter-vue"
             target="_blank"
+            rel="noopener noreferrer"
             icon="simple-icons:github"
             aria-label="GitHub"
             color="neutral"

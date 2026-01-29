@@ -5,25 +5,25 @@ export default defineNuxtConfig({
     '@nuxt/ui'
   ],
 
-  runtimeConfig: {
-    public: {
-      pdfMergeApiBase: ((process as any)?.env?.PDF_MERGE_API_BASE_URL) || ''
-    }
-  },
-
   devtools: {
     enabled: true
   },
 
   css: ['~/assets/css/main.css'],
 
+  runtimeConfig: {
+    public: {
+      pdfMergeApiBase: (process.env?.PDF_MERGE_API_BASE_URL) || ''
+    }
+  },
+
   routeRules: {
     '/': { prerender: true }
   },
 
-  debug: true,
-
   compatibilityDate: '2025-01-15',
+
+  debug: true,
 
   eslint: {
     config: {

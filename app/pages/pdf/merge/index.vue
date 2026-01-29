@@ -1,11 +1,23 @@
 <script setup lang="ts">
-import { VueDraggableNext } from 'vue-draggable-next'
-import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import usePdfMerge from '../../../../composables/usePdfMerge'
 import { navigateTo } from '#app'
+import { useToast } from '#imports'
 
 const value = ref<File[]>([])
-const uploaderRef = ref<any>(null)
+// uploaderRef holds the file upload component instance. Typed to the exposed shape from UFileUpload.
+// The component exposes raw HTMLElements for refs, not Vue Refs, so reflect that here.
+const uploaderRef = ref<{ dropzoneRef?: HTMLElement | null, inputRef?: HTMLElement | null } | null>(null)
+const toast = useToast()
+
+// UI props moved to constants to avoid inline object recreation on each render
+const uiFileUpload = {
+  label: 'text-xl',
+  description: 'text-lg'
+}
+
+// Lazy-load draggable to reduce initial bundle size
+const VueDraggableNext = defineAsyncComponent(() => import('vue-draggable-next').then(m => (m && (m as any).VueDraggableNext) || (m && (m as any).default) || m))
 
 const MAX_FILES = 25
 const MAX_BYTES = 50 * 1024 * 1024 // 50 MB
@@ -44,29 +56,52 @@ const validateFiles = (files: File[] = []): ValidationResult => {
   return { kept, removedByCount, removedBySize, invalid }
 }
 
-// Validate incoming `value` and enforce PDF/type and limits
-watch(value, (newFiles: File[]) => {
-  if (!newFiles) return
+// Compare two file arrays by name/size/lastModified to avoid unnecessary reassignments
+const getLastModified = (f: File) => (f as unknown as { lastModified?: number }).lastModified ?? 0
 
-  const { kept, removedByCount, removedBySize, invalid } = validateFiles(newFiles)
+const filesEqual = (a: File[] = [], b: File[] = []) => {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const fa = a[i]
+    const fb = b[i]
+    if (!fa || !fb) return false
+    if (fa.name !== fb.name || fa.size !== fb.size || getLastModified(fa) !== getLastModified(fb)) return false
+  }
+  return true
+}
+
+// Consolidated watcher: validates incoming files and also initializes per-file progress
+watch(value, (newFiles: File[] | undefined) => {
+  // Ensure we have an array
+  const incoming = newFiles || []
+
+  const { kept, removedByCount, removedBySize, invalid } = validateFiles(incoming)
 
   if (invalid.length) {
-    value.value = kept
-    // eslint-disable-next-line no-alert
-    alert('Apenas arquivos PDF são permitidos!')
+    // Keep only valid files
+    if (!filesEqual(value.value, kept)) value.value = kept
+    toast.add({ title: 'Erro', description: 'Apenas arquivos PDF são permitidos!' })
+    // initialize progress array
+    fileProgress.value = value.value.map(() => 0)
     return
   }
 
   const removedLimit = [...removedByCount, ...removedBySize]
   if (removedLimit.length) {
-    value.value = kept
+    if (!filesEqual(value.value, kept)) value.value = kept
     let msg = 'Limite atingido.'
     if (removedByCount.length) msg += ` Quantidade de arquivos excedida (máx ${MAX_FILES}).`
     if (removedBySize.length) msg += ` Limite de tamanho excedido (máx ${(MAX_BYTES / 1024 / 1024).toFixed(2)}MB).`
-    // eslint-disable-next-line no-alert
-    alert(msg)
+    toast.add({ title: 'Aviso', description: msg })
+    // initialize progress array
+    fileProgress.value = value.value.map(() => 0)
     return
   }
+
+  // If validation passed, keep incoming files and reset progress
+  if (!filesEqual(value.value, kept)) value.value = kept
+  fileProgress.value = value.value.map(() => 0)
 })
 
 // Handlers declared in module scope so they can be attached/detached cleanly.
@@ -89,13 +124,12 @@ const dzDropHandler = (e: DragEvent) => {
   const files = Array.from(dt.files || [])
   const { invalid } = validateFiles(files)
   if (invalid.length) {
-    // eslint-disable-next-line no-alert
-    alert('Apenas arquivos PDF são permitidos.')
+    toast.add({ title: 'Erro', description: 'Apenas arquivos PDF são permitidos.' })
   }
 }
 
 onMounted(() => {
-  const dzEl = uploaderRef.value?.dropzoneRef?.value
+  const dzEl = uploaderRef.value?.dropzoneRef
   window.addEventListener('dragover', windowDragOver, { passive: false })
   window.addEventListener('drop', windowDrop, { passive: false })
   if (dzEl) dzEl.addEventListener('drop', dzDropHandler)
@@ -104,7 +138,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('dragover', windowDragOver as EventListener)
   window.removeEventListener('drop', windowDrop as EventListener)
-  const dzEl = uploaderRef.value?.dropzoneRef?.value
+  const dzEl = uploaderRef.value?.dropzoneRef
   if (dzEl) dzEl.removeEventListener('drop', dzDropHandler as EventListener)
 })
 
@@ -126,7 +160,7 @@ const filesLabel = computed(() => {
 })
 
 // Integration with backend composable
-const { isUploading: uploadingFlag, error: uploadError, requestPresignedPosts, uploadFiles, requestMerge, requestPresignedGet } = usePdfMerge()
+const { isUploading: uploadingFlag, requestPresignedPosts, uploadFiles, requestMerge } = usePdfMerge()
 const isUploading = uploadingFlag
 // merged URL state is handled by the nested `download` child route via query params
 const fileProgress = ref<number[]>([])
@@ -152,16 +186,10 @@ watch(totalPages, (tp) => {
   if (currentPage.value > tp) currentPage.value = tp
 })
 
-// initialize progress array whenever files change
-watch(value, (files: File[]) => {
-  fileProgress.value = files?.map(() => 0) || []
-})
-
 const handleMerge = async () => {
   if (isUploading.value) return
   if (totalFiles.value < 2) {
-    // eslint-disable-next-line no-alert
-    alert('Selecione pelo menos dois arquivos para juntar.')
+    toast.add({ title: 'Aviso', description: 'Selecione pelo menos dois arquivos para juntar.' })
     return
   }
 
@@ -187,12 +215,11 @@ const handleMerge = async () => {
       // navigate to nested download route with fileKey
       await navigateTo({ path: '/pdf/merge/download', query: { key: mergeRes.fileKey } })
     } else {
-      // eslint-disable-next-line no-alert
-      alert(mergeRes.message || 'Merge concluído sem URL de download')
+      toast.add({ title: 'Info', description: mergeRes.message || 'Merge concluído sem URL de download' })
     }
-  } catch (err: any) {
-    // eslint-disable-next-line no-alert
-    alert(err?.message || 'Erro durante upload/merge')
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    toast.add({ title: 'Erro', description: msg || 'Erro durante upload/merge' })
   }
 }
 </script>
@@ -200,11 +227,11 @@ const handleMerge = async () => {
 <template>
   <UPage>
     <UPageSection
-        title="Juntar arquivos PDF"
-        description="Mesclar e juntar PDFs e colocá-los em qualquer ordem que desejar. É tudo muito fácil e rápido!"
-        class="-mb-10"
+      title="Juntar arquivos PDF"
+      description="Mesclar e juntar PDFs e colocá-los em qualquer ordem que desejar. É tudo muito fácil e rápido!"
+      class="-mb-10"
     />
-    
+
     <UFileUpload
       ref="uploaderRef"
       v-model="value"
@@ -215,79 +242,161 @@ const handleMerge = async () => {
       layout="list"
       multiple
       class="w-4/5 min-h-60 mx-auto transition-colors cursor-pointer"
-      :ui="{ label: 'text-xl', description: 'text-lg' }"
+      :ui="uiFileUpload"
     >
       <template #leading>
-        <UIcon name="i-lucide-upload-cloud" class="w-12 h-12 text-red-600 dark:text-red-400" />
+        <UIcon
+          name="i-lucide-upload-cloud"
+          class="w-12 h-12 text-red-600 dark:text-red-400"
+          aria-hidden="true"
+        />
       </template>
 
       <template #files>
-        <div v-if="value.length" class="flex justify-between items-center mt-6">
+        <div
+          v-if="value.length"
+          class="flex justify-between items-center mt-6"
+        >
           <div>
-            <h3 class="text-lg font-bold">Seus Arquivos</h3>
-            <p class="text-sm text-gray-500">Arraste e solte para reordenar. Os arquivos serão juntados do primeiro ao último.</p>
+            <h3 class="text-lg font-bold">
+              Seus Arquivos
+            </h3>
+            <p class="text-sm text-gray-500">
+              Arraste e solte para reordenar. Os arquivos serão juntados do primeiro ao último.
+            </p>
           </div>
-          <UButton variant="ghost" @click="clearFiles">
-              Limpar
-              <UIcon name="i-lucide-circle-x" />
+          <UButton
+            variant="ghost"
+            aria-label="Limpar arquivos"
+            @click="clearFiles"
+          >
+            Limpar
+            <UIcon
+              name="i-lucide-circle-x"
+              aria-hidden="true"
+            />
           </UButton>
         </div>
 
-          <div v-if="isUploading" class="w-full">
-            <p class="text-sm text-gray-700 dark:text-gray-300">Enviando arquivos... Progresso: {{ Math.round((fileProgress.reduce((a,b)=>a+b,0) / (fileProgress.length || 1))) }}%</p>
-          </div>
+        <div
+          v-if="isUploading"
+          class="w-full"
+        >
+          <p class="text-sm text-gray-700 dark:text-gray-300">
+            Enviando arquivos... Progresso: {{ Math.round((fileProgress.reduce((a, b) => a+b, 0) / (fileProgress.length || 1))) }}%
+          </p>
+        </div>
 
-
-        <VueDraggableNext v-if="value.length" v-model="pagedFiles" class="dark:divide-gray-400" handle=".handle">
-            <div v-for="(file, pIndex) in pagedFiles" :key="file.name" class="flex handle cursor-move justify-between px-2 m-2 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-300">
-                <div class="flex items-center gap-4">
-                  <UIcon name="i-lucide-grip-vertical" class="w-6 h-6 " />
-                  <div class="flex-1 m-2">
-                      <p class="text-md dark:text-white">
-                          {{ file.name }}
-                      </p>
-                      <p class="text-sm dark:text-gray-400">
-                          {{ (file.size / 1024 / 1024).toFixed(2) }} MB
-                      </p>
-                      <p v-if="fileProgress.length" class="text-sm text-gray-600">Progresso: {{ fileProgress[((currentPage-1)*pageSize)+pIndex] || 0 }}%</p>
-                  </div>
-                </div>
-                <UButton icon="i-lucide-x" class="h-7 my-auto" variant="ghost" @click="removeFile(file)" />
+        <VueDraggableNext
+          v-if="value.length"
+          v-model="pagedFiles"
+          class="dark:divide-gray-400"
+          handle=".handle"
+        >
+          <div
+            v-for="(file, pIndex) in pagedFiles"
+            :key="file.name + '-' + file.lastModified"
+            class="flex handle cursor-move justify-between px-2 m-2 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-300"
+          >
+            <div class="flex items-center gap-4">
+              <UIcon
+                name="i-lucide-grip-vertical"
+                class="w-6 h-6 "
+                aria-hidden="true"
+              />
+              <div class="flex-1 m-2">
+                <p class="text-md dark:text-white">
+                  {{ file.name }}
+                </p>
+                <p class="text-sm dark:text-gray-400">
+                  {{ (file.size / 1024 / 1024).toFixed(2) }} MB
+                </p>
+                <p
+                  v-if="fileProgress.length"
+                  class="text-sm text-gray-600"
+                >
+                  Progresso: {{ fileProgress[((currentPage-1)*pageSize)+pIndex] || 0 }}%
+                </p>
+              </div>
             </div>
+            <UButton
+              icon="i-lucide-x"
+              class="h-7 my-auto"
+              variant="ghost"
+              aria-label="Remover arquivo"
+              @click="removeFile(file)"
+            />
+          </div>
         </VueDraggableNext>
-        <div v-if="value.length" class="flex items-center justify-between gap-4 mt-4">
+        <div
+          v-if="value.length"
+          class="flex items-center justify-between gap-4 mt-4"
+        >
           <div class="flex items-center gap-2">
-            <UButton size="sm" variant="outline" :disabled="currentPage===1" @click="currentPage = Math.max(1, currentPage-1)">Anterior</UButton>
+            <UButton
+              size="sm"
+              variant="outline"
+              :disabled="currentPage===1"
+              @click="currentPage = Math.max(1, currentPage-1)"
+            >
+              Anterior
+            </UButton>
             <span class="text-sm">Página {{ currentPage }} / {{ totalPages }}</span>
-            <UButton size="sm" variant="outline" :disabled="currentPage>=totalPages" @click="currentPage = Math.min(totalPages, currentPage+1)">Próxima</UButton>
+            <UButton
+              size="sm"
+              variant="outline"
+              :disabled="currentPage>=totalPages"
+              @click="currentPage = Math.min(totalPages, currentPage+1)"
+            >
+              Próxima
+            </UButton>
           </div>
           <div>
             <label class="text-sm">Por página:</label>
-            <select v-model.number="pageSize" class="ml-2 text-sm">
-              <option :value="5">5</option>
-              <option :value="10">10</option>
-              <option :value="25">25</option>
+            <select
+              v-model.number="pageSize"
+              class="ml-2 text-sm"
+            >
+              <option :value="5">
+                5
+              </option>
+              <option :value="10">
+                10
+              </option>
+              <option :value="25">
+                25
+              </option>
             </select>
           </div>
         </div>
-        <div v-if="value.length" class="flex flex-col gap-4 mt-6 mb-6">
-
+        <div
+          v-if="value.length"
+          class="flex flex-col gap-4 mt-6 mb-6"
+        >
           <div class="flex justify-between items-center">
             <div>
               <p class="text-sm text-gray-900 dark:text-white">
                 {{ totalFiles }} {{ filesLabel }}, totalizando: {{ (totalSize / 1024 / 1024).toFixed(2) }}MB
               </p>
             </div>
-            <UButton size="xl" label="Juntar" :disabled="totalFiles < 2 || isUploading" @click="handleMerge">
-                <span v-if="!isUploading">Juntar</span>
-                <span v-else>Enviando...</span>
-                <UIcon name="i-lucide-merge" />
+            <UButton
+              size="xl"
+              label="Juntar"
+              :disabled="totalFiles < 2 || isUploading"
+              @click="handleMerge"
+            >
+              <span v-if="!isUploading">Juntar</span>
+              <span v-else>Enviando...</span>
+              <UIcon
+                name="i-lucide-merge"
+                aria-hidden="true"
+              />
             </UButton>
           </div>
         </div>
       </template>
     </UFileUpload>
     <!-- nested child route will render here when navigated to /pdf/merge/download -->
-    <router-view />
+    <NuxtChild />
   </UPage>
 </template>

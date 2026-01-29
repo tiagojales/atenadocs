@@ -7,7 +7,7 @@ export default defineEventHandler((event) => {
       // Redirect to the builds folder where assets are served in dev
       return sendRedirect(event, '/_nuxt/builds/')
     }
-  } catch (e) {
+  } catch {
     // ignore
   }
 })
