@@ -23,8 +23,8 @@ const VueDraggableNext = defineAsyncComponent(async () => {
   return candidate
 })
 
-const MAX_FILES = 25
-const MAX_BYTES = 50 * 1024 * 1024 // 50 MB
+const MAX_FILES = 50
+const MAX_BYTES = 100 * 1024 * 1024 // 100 MB
 
 const isPdf = (f?: File) => !!f && (f.type === 'application/pdf' || f.name?.toLowerCase().endsWith('.pdf'))
 
