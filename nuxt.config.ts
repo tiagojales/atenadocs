@@ -5,10 +5,6 @@ export default defineNuxtConfig({
     '@nuxt/ui'
   ],
 
-  devtools: {
-    enabled: true
-  },
-
   css: ['~/assets/css/main.css'],
 
   runtimeConfig: {
@@ -20,13 +16,7 @@ export default defineNuxtConfig({
     }
   },
 
-  routeRules: {
-    '/': { prerender: true }
-  },
-
   compatibilityDate: '2025-01-15',
-
-  debug: true,
 
   eslint: {
     config: {
