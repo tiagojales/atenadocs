@@ -1,16 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRoute, navigateTo } from '#app'
-import usePdfMerge, { type UsePdfMergeReturn } from '../../../../composables/usePdfMerge'
-
 // Page overview:
-// Resolve a download target from the route query (either a direct URL or a server key),
-// obtain a presigned GET URL when needed, and provide a client-side download flow
-// that attempts to preserve the original filename when possible.
+// Resolve a download target from the route query (only a direct URL is supported),
+// and provide a client-side download flow that attempts to preserve the original filename.
 
-// Router and backend composable (typed)
+// Router
 const route = useRoute()
-const { requestPresignedGet } = usePdfMerge() as UsePdfMergeReturn
 
 // Reactive state
 // - `downloadUrl`: final URL that will be fetched by the client
@@ -92,20 +88,14 @@ const start = async () => {
     return
   }
 
+  // Backend no longer exposes a /download endpoint to exchange fileKey for a presigned URL.
+  // If no `url` query param is present, surface a clear error to the user.
   if (key) {
-    loading.value = true
-    try {
-      const res = await requestPresignedGet(key as string)
-      if (res?.downloadUrl) downloadUrl.value = res.downloadUrl
-      else error.value = 'URL de download não disponível.'
-    } catch (err: unknown) {
-      error.value = getErrorMessage(err, 'Erro ao solicitar URL de download.')
-    } finally {
-      loading.value = false
-    }
-  } else {
-    error.value = 'Nenhuma chave ou URL fornecida.'
+    error.value = 'Chave fornecida, mas a obtenção de URL via backend não é suportada. Tente novamente e verifique se o backend retornou um `downloadUrl`.'
+    return
   }
+
+  error.value = 'Nenhuma URL de download fornecida.'
 }
 
 // Start resolving URL on client mount

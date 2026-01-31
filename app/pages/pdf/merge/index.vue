@@ -205,8 +205,8 @@ const handleMerge = async () => {
     if (mergeRes.downloadUrl) {
       await navigateTo({ path: '/pdf/merge/download', query: { url: mergeRes.downloadUrl } })
     } else if (mergeRes.fileKey) {
-      // navigate to nested download route with fileKey
-      await navigateTo({ path: '/pdf/merge/download', query: { key: mergeRes.fileKey } })
+      // Backend didn't return an immediate presigned URL; inform the user.
+      toast.add({ title: 'Info', description: 'Merge concluído, mas a URL de download não está disponível no momento. Tente novamente em alguns instantes.' })
     } else {
       toast.add({ title: 'Info', description: mergeRes.message || 'Merge concluído sem URL de download' })
     }

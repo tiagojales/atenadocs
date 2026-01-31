@@ -7,11 +7,6 @@ export default defineNuxtConfig({
 
   css: ['~/assets/css/main.css'],
 
-  vite: {
-    build: { sourcemap: true },
-    css: { devSourcemap: true }
-  },
-
   runtimeConfig: {
     public: {
       pdfMergeApiBase: (process.env?.PDF_MERGE_API_BASE_URL) || '',
