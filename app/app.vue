@@ -1,5 +1,9 @@
 <script setup>
+import pkg from '../package.json'
+
 const year = new Date().getFullYear()
+const projectName = pkg.name || 'aDocs'
+const projectVersion = pkg.version || '0.0.1'
 </script>
 
 <template>
@@ -34,7 +38,7 @@ const year = new Date().getFullYear()
 
         <template #right>
           <p class="text-sm text-muted">
-            Project Source Code:
+            {{ projectName }} v{{ projectVersion }}
           </p>
           <UButton
             href="https://github.com/tiagojales/atenadocs.git"
