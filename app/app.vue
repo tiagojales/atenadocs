@@ -31,8 +31,12 @@ const projectCodename = pkg.codename || 'Aurora'
       <UFooter>
         <template #left>
           <p class="text-sm text-muted">
-            Developed by 
-            <a href="https://www.linkedin.com/in/tiago-jales-118886121/" target="_blank" rel="noopener noreferrer">
+            Developed by
+            <a
+              href="https://www.linkedin.com/in/tiago-jales-118886121/"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               Tiago Jales</a> • © {{ year }}
           </p>
         </template>

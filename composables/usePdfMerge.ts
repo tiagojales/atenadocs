@@ -25,7 +25,7 @@ export type UsePdfMergeReturn = {
   uploadFiles: (files: File[], uploads: UploadDescriptor[], opts?: { concurrency?: number, attempts?: number, onFileProgress?: (index: number, uploaded: number, total: number) => void }) => Promise<void>
   cancelUploads: () => void
   requestMerge: (fileKeys: string[]) => Promise<{ message?: string, downloadUrl?: string, fileKey?: string }>
-  
+
 }
 
 export function usePdfMerge(): UsePdfMergeReturn {
@@ -63,8 +63,6 @@ export function usePdfMerge(): UsePdfMergeReturn {
     if (!resp.ok) throw new Error(`Merge request failed: ${resp.status}`)
     return (await resp.json()) as { message?: string, downloadUrl?: string, fileKey?: string }
   }
-
-  
 
   const UPLOAD_TIMEOUT_MS = 2 * 60 * 1000 // 2 minutes
 
@@ -125,9 +123,10 @@ export function usePdfMerge(): UsePdfMergeReturn {
       try {
         await doXhrUpload(post, file, onProgress, id)
         return
-      } catch (err: any) {
+      } catch (err: unknown) {
         lastErr = err
-        if (err && err.retryable === false) throw err
+        const maybe = err as { retryable?: boolean }
+        if (maybe.retryable === false) throw err
         if (i < attempts) await new Promise(r => setTimeout(r, 2 ** i * 250))
       }
     }
@@ -186,7 +185,11 @@ export function usePdfMerge(): UsePdfMergeReturn {
   const cancelUploads = () => {
     cancelled.value = true
     for (const [_k, xhr] of activeXhrs) {
-      try { xhr.abort() } catch {}
+      try {
+        xhr.abort()
+      } catch (e) {
+        void e
+      }
     }
     activeXhrs.clear()
   }

@@ -1,11 +1,9 @@
 <script setup>
-
 const ui = {
   title: 'text-4xl md:text-5xl',
   description: 'text-base md:text-2xl'
 }
 </script>
-
 
 <template>
   <UPage>
@@ -72,5 +70,3 @@ const ui = {
     </UPageSection>
   </UPage>
 </template>
-
-
