@@ -3,6 +3,7 @@ import pkg from '../package.json'
 
 const year = new Date().getFullYear()
 const projectName = pkg.name || 'aDocs'
+const projectVersion = pkg.version || '0.0.1'
 const projectCodename = pkg.codename || 'Aurora'
 </script>
 
