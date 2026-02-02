@@ -3,7 +3,7 @@ import pkg from '../package.json'
 
 const year = new Date().getFullYear()
 const projectName = pkg.name || 'aDocs'
-const projectVersion = pkg.version || '0.0.1'
+const projectCodename = pkg.codename || 'Aurora'
 </script>
 
 <template>
@@ -38,7 +38,7 @@ const projectVersion = pkg.version || '0.0.1'
 
         <template #right>
           <p class="text-sm text-muted">
-            {{ projectName }} v{{ projectVersion }}
+            {{ projectName }} - {{ projectCodename }} v{{ projectVersion }}
           </p>
           <UButton
             href="https://github.com/tiagojales/atenadocs.git"
