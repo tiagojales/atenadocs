@@ -26,13 +26,18 @@ const year = new Date().getFullYear()
       <UFooter>
         <template #left>
           <p class="text-sm text-muted">
-            Developed by Tiago Jales • © {{ year }}
+            Developed by 
+            <a href="https://www.linkedin.com/in/tiago-jales-118886121/" target="_blank" rel="noopener noreferrer">
+              Tiago Jales</a> • © {{ year }}
           </p>
         </template>
 
         <template #right>
+          <p class="text-sm text-muted">
+            Project Source Code:
+          </p>
           <UButton
-            href="https://github.com/nuxt-ui-templates/starter-vue"
+            href="https://github.com/tiagojales/atenadocs.git"
             target="_blank"
             rel="noopener noreferrer"
             icon="simple-icons:github"
